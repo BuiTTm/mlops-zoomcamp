@@ -3,11 +3,14 @@ import pandas as pd
 from sklearn.feature_extraction import DictVectorizer
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error
+from prefect import flow, task 
+import datetime as dt
 
 def read_data(path):
     df = pd.read_parquet(path)
     return df
 
+@task
 def prepare_features(df, categorical, train=True):
     df['duration'] = df.dropOff_datetime - df.pickup_datetime
     df['duration'] = df.duration.dt.total_seconds() / 60
@@ -22,6 +25,7 @@ def prepare_features(df, categorical, train=True):
     df[categorical] = df[categorical].fillna(-1).astype('int').astype('str')
     return df
 
+@task
 def train_model(df, categorical):
 
     train_dicts = df[categorical].to_dict(orient='records')
@@ -39,6 +43,7 @@ def train_model(df, categorical):
     print(f"The MSE of training is: {mse}")
     return lr, dv
 
+@task
 def run_model(df, categorical, dv, lr):
     val_dicts = df[categorical].to_dict(orient='records')
     X_val = dv.transform(val_dicts) 
@@ -49,16 +54,36 @@ def run_model(df, categorical, dv, lr):
     print(f"The MSE of validation is: {mse}")
     return
 
-def main(train_path: str = './data/fhv_tripdata_2021-01.parquet', 
-           val_path: str = './data/fhv_tripdata_2021-02.parquet'):
+@task
+def get_paths(date):
+    if date is None:
+        date = dt.date.today()
+    else:
+        date = dt.datetime.strptime(date, "%Y-%m-%d")
+    current_date = date.strftime("%Y-%m-%d")
+    date_obj = dt.datetime.strptime(current_date, "%Y-%m-%d")
+    date_val_obj = date_obj - pd.DateOffset(months=1)
+    date_train_obj = date_obj - pd.DateOffset(months=2)
+    print(date_train_obj, date_val_obj)
+    train_path = f'./data/fhv_tripdata_{date_train_obj.date().strftime("%Y-%m")}.parquet'
+    val_path = f'./data/fhv_tripdata_{date_val_obj.date().strftime("%Y-%m")}.parquet'
+    print(f'train_path={train_path}')
+    print(f'val_path={val_path}')
+    return train_path, val_path
+
+@flow
+# def main(train_path: str = './data/fhv_tripdata_2021-01.parquet', 
+#            val_path: str = './data/fhv_tripdata_2021-02.parquet'):
+def main(date = "2021-08-15"):
+    train_path, val_path = get_paths(date).result()
 
     categorical = ['PUlocationID', 'DOlocationID']
 
     df_train = read_data(train_path)
-    df_train_processed = prepare_features(df_train, categorical)
+    df_train_processed = prepare_features(df_train, categorical).result()
 
     df_val = read_data(val_path)
-    df_val_processed = prepare_features(df_val, categorical, False)
+    df_val_processed = prepare_features(df_val, categorical, False).result()
 
     # train the model
     lr, dv = train_model(df_train_processed, categorical)
