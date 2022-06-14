@@ -5,6 +5,7 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error
 from prefect import flow, task 
 import datetime as dt
+import pickle
 
 def read_data(path):
     df = pd.read_parquet(path)
@@ -80,13 +81,19 @@ def main(date = "2021-08-15"):
     categorical = ['PUlocationID', 'DOlocationID']
 
     df_train = read_data(train_path)
-    df_train_processed = prepare_features(df_train, categorical).result()
+    df_train_processed = prepare_features(df_train, categorical)
 
     df_val = read_data(val_path)
-    df_val_processed = prepare_features(df_val, categorical, False).result()
+    df_val_processed = prepare_features(df_val, categorical, False)
 
     # train the model
-    lr, dv = train_model(df_train_processed, categorical)
+    lr, dv = train_model(df_train_processed, categorical).result()
     run_model(df_val_processed, categorical, dv, lr)
+    
+    with open(f"models/dv-{date}.b", "wb") as f_out:
+        pickle.dump(dv, f_out)
+    with open(f'models/model-{date}.bin', 'wb') as f_out:
+        pickle.dump((dv, lr), f_out)
+
 
 main()
